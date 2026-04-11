@@ -29,49 +29,6 @@ const checkRateLimit = (phone) => {
 };
 
 // POST /api/auth/customer/send-otp
-// router.post("/customer/send-otp", async (req, res) => {
-//   try {
-//     const { phone, restaurantId = "default" } = req.body;
-
-//     if (!phone || !/^[\+]?[1-9][\d]{9,14}$/.test(phone)) {
-//       return res.status(400).json({ error: "Valid phone number required" });
-//     }
-
-//     if (!checkRateLimit(phone)) {
-//       return res.status(429).json({ error: "Too many OTP requests. Try again later." });
-//     }
-
-//     const otp = otpService.generateOTP();
-//     await otpService.sendOTP(phone, otp);
-
-//     // Create or update customer record
-//     let customer = await Customer.findOne({ phone, restaurantId });
-//     if (!customer) {
-//       customer = new Customer({ phone, restaurantId });
-//     }
-//     customer.otp = otpService.hashOTP(otp);
-//     customer.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
-//     await customer.save();
-
-//     // DEVELOPMENT MODE: Include OTP in response for testing
-//     const isDevelopment = process.env.NODE_ENV !== 'production';
-//     const response = {
-//       message: "OTP sent successfully",
-//       expiresIn: 300
-//     };
-
-//     if (isDevelopment) {
-//       response.testOtp = otp; // Only in development
-//       response.message += " (Check server console for OTP)";
-//     }
-
-//     res.json(response);
-//   } catch (err) {
-//     console.error("Send OTP error:", err);
-//     res.status(500).json({ error: "Failed to send OTP" });
-//   }
-// });
-
 router.post("/customer/send-otp", async (req, res) => {
   try {
     const { phone, restaurantId = "default" } = req.body;
@@ -85,65 +42,33 @@ router.post("/customer/send-otp", async (req, res) => {
     }
 
     const otp = otpService.generateOTP();
+    await otpService.sendOTP(phone, otp);
 
-    // ── Step 1: Save to DB FIRST before sending SMS ───────────────────────
+    // Create or update customer record
     let customer = await Customer.findOne({ phone, restaurantId });
     if (!customer) {
       customer = new Customer({ phone, restaurantId });
     }
-    customer.otp       = otpService.hashOTP(otp);
+    customer.otp = otpService.hashOTP(otp);
     customer.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
     await customer.save();
 
-    // ── Step 2: Send SMS via MSG91 ────────────────────────────────────────
-    if (process.env.NODE_ENV === "production") {
-      const axios = require("axios");
-
-      // Format number — MSG91 needs 12 digits: 919876543210
-      const digits = phone.replace(/\D/g, "");
-      const mobile = digits.length === 10 ? `91${digits}` : digits;
-
-      const result = await axios.post(
-        "https://control.msg91.com/api/v5/otp",
-        {
-          authkey:     process.env.MSG91_AUTH_KEY,
-          template_id: process.env.MSG91_TEMPLATE_ID,
-          mobile:      mobile,
-          otp:         otp,
-        },
-        { headers: { "Content-Type": "application/json" } }
-      );
-
-      console.log("MSG91 response:", result.data);
-
-      if (result.data.type !== "success") {
-        console.error("MSG91 error:", result.data);
-        return res.status(500).json({ 
-          error: `SMS failed: ${result.data.message || "Unknown MSG91 error"}` 
-        });
-      }
-
-    } else {
-      // Development: print OTP to Render/terminal logs
-      console.log(`\n📱 DEV OTP for ${phone}: ${otp}\n`);
-    }
-
-    // ── Step 3: Send response ─────────────────────────────────────────────
+    // DEVELOPMENT MODE: Include OTP in response for testing
+    const isDevelopment = process.env.NODE_ENV !== 'production';
     const response = {
-      message:   "OTP sent successfully",
-      expiresIn: 300,
+      message: "OTP sent successfully",
+      expiresIn: 300
     };
 
-    // Only include OTP in response body in development
-    if (process.env.NODE_ENV !== "production") {
-      response.testOtp = otp;
+    if (!isDevelopment) {
+      response.testOtp = otp; // Only in development
+      response.message += " (Check server console for OTP)";
     }
 
     res.json(response);
-
   } catch (err) {
-    console.error("Send OTP error:", err.message);
-    res.status(500).json({ error: err.message || "Failed to send OTP" });
+    console.error("Send OTP error:", err);
+    res.status(500).json({ error: "Failed to send OTP" });
   }
 });
 
